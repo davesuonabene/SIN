@@ -1,18 +1,31 @@
-class BaseNode:
-    def __init__(self, dpg_tag):
-        self.dpg_tag = dpg_tag
-        self.inputs = {}
-        self.outputs = {}
+from collections import deque
 
-    def compute(self, control_queue):
-        print(f"Computing node {self.dpg_tag}...")
+class BaseNode:
+    def __init__(self, dpg_tag, input_attrs=None, output_attrs=None):
+        self.dpg_tag = dpg_tag
+        self.inputs = {tag: None for tag in (input_attrs or [])}
+        self.outputs = {tag: None for tag in (output_attrs or [])}
+
+    def compute(self, inputs):
+        print(f"Computing node {self.dpg_tag} with inputs: {inputs}")
         
-        task = {
-            "type": "compute",
-            "node_tag": self.dpg_tag
-        }
+        output_value = 1.0 
         
-        control_queue.put(task)
+        if self.inputs:
+            try:
+                first_input_key = list(self.inputs.keys())[0]
+                input_value = inputs.get(first_input_key)
+                if input_value is not None:
+                    output_value = input_value
+            except Exception:
+                pass
+        
+        outputs = {}
+        for output_key in self.outputs:
+            outputs[output_key] = output_value
+        
+        print(f"Node {self.dpg_tag} produced outputs: {outputs}")
+        return outputs
 
 class GraphManager:
     def __init__(self, audio_engine):
@@ -20,10 +33,14 @@ class GraphManager:
         self.links = {}
         self.audio_engine = audio_engine
 
-    def add_node(self, node_type, dpg_tag):
+    def add_node(self, node_type, dpg_tag, input_attrs=None, output_attrs=None):
         print(f"GraphManager: Adding node {dpg_tag} of type {node_type}")
         if node_type == "BaseNode":
-            new_node = BaseNode(dpg_tag=dpg_tag)
+            new_node = BaseNode(
+                dpg_tag=dpg_tag, 
+                input_attrs=input_attrs, 
+                output_attrs=output_attrs
+            )
             self.nodes[dpg_tag] = new_node
         else:
             print(f"GraphManager: Unknown node type {node_type}")
@@ -51,9 +68,56 @@ class GraphManager:
         return links_to_remove
 
     def process_graph(self):
-        print("GraphManager: --- Starting Graph Process ---")
+        print("GraphManager: --- Preparing Graph Process Task ---")
         
-        for dpg_tag, node in self.nodes.items():
-            node.compute(self.audio_engine.control_queue)
+        node_lookup_by_attr = {}
+        for node_tag, node in self.nodes.items():
+            for attr in node.inputs:
+                node_lookup_by_attr[attr] = node_tag
+            for attr in node.outputs:
+                node_lookup_by_attr[attr] = node_tag
+        
+        adj = {node_tag: [] for node_tag in self.nodes}
+        in_degree = {node_tag: 0 for node_tag in self.nodes}
+        
+        link_map = {}
+
+        for attr_out, attr_in in self.links.values():
+            if attr_out in node_lookup_by_attr and attr_in in node_lookup_by_attr:
+                source_node = node_lookup_by_attr[attr_out]
+                dest_node = node_lookup_by_attr[attr_in]
+                
+                if dest_node not in adj[source_node]:
+                    adj[source_node].append(dest_node)
+                    in_degree[dest_node] += 1
+                
+                link_map[attr_in] = attr_out
+            
+        queue = deque([node_tag for node_tag in self.nodes if in_degree[node_tag] == 0])
+        sorted_nodes = []
+        
+        while queue:
+            node_tag = queue.popleft()
+            sorted_nodes.append(node_tag)
+            
+            for neighbor in adj[node_tag]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+                    
+        if len(sorted_nodes) != len(self.nodes):
+            print("GraphManager: Error: Cycle detected in graph. Process aborted.")
+            return
+
+        print(f"GraphManager: Submitting task for execution order: {sorted_nodes}")
+        
+        task = {
+            'type': 'process_graph',
+            'sorted_nodes': sorted_nodes,
+            'link_map': link_map,
+            'nodes_map': self.nodes
+        }
+        
+        self.audio_engine.control_queue.put(task)
         
         print("GraphManager: --- Graph Process Submitted ---")
