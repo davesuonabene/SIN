@@ -49,7 +49,7 @@ class AudioEngine:
         print("AudioEngine: --- Starting Graph Process ---")
         
         sorted_nodes = task['sorted_nodes']
-        link_map = task['link_map']
+        link_map_by_tag = task['link_map_by_tag']
         nodes_map = task['nodes_map']
         
         attribute_data_map = {}
@@ -57,18 +57,21 @@ class AudioEngine:
         for node_tag in sorted_nodes:
             node = nodes_map[node_tag]
             
-            inputs = {}
-            for input_attr_tag in node.inputs:
-                if input_attr_tag in link_map:
-                    source_attr_tag = link_map[input_attr_tag]
-                    inputs[input_attr_tag] = attribute_data_map.get(source_attr_tag)
+            inputs_by_name = {}
+            for input_name, input_tag in node.input_attr_map.items():
+                if input_tag in link_map_by_tag:
+                    source_attr_tag = link_map_by_tag[input_tag]
+                    inputs_by_name[input_name] = attribute_data_map.get(source_attr_tag)
                 else:
-                    inputs[input_attr_tag] = None
+                    inputs_by_name[input_name] = None
             
             try:
-                outputs = node.compute(inputs)
-                for output_attr_tag, value in outputs.items():
-                    attribute_data_map[output_attr_tag] = value
+                outputs_by_name = node.compute(inputs_by_name)
+                
+                for output_name, value in outputs_by_name.items():
+                    if output_name in node.output_attr_map:
+                        output_tag = node.output_attr_map[output_name]
+                        attribute_data_map[output_tag] = value
             except Exception as e:
                 print(f"AudioEngine: Error computing node {node_tag}: {e}")
                 return f"Error: Node {node_tag} failed."

@@ -1,7 +1,24 @@
 import dearpygui.dearpygui as dpg
 from audio_engine import AudioEngine
 from node_graph import GraphManager
+from nodes import NODE_REGISTRY
 import queue
+
+def show_node_context_menu(sender, app_data, user_data):
+    try:
+        # Only show menu when over the Node Editor
+        if dpg.is_item_hovered("Node Editor"):
+            mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
+            dpg.set_item_pos("Node Context Menu", [int(mouse_x), int(mouse_y)])
+            dpg.configure_item("Node Context Menu", show=True)
+    except Exception as e:
+        print(f"GUI: Failed to show node context menu: {e}")
+
+def hide_node_context_menu(sender, app_data, user_data):
+    try:
+        dpg.configure_item("Node Context Menu", show=False)
+    except Exception:
+        pass
 
 def start_engine_callback():
     print("GUI: Starting engine...")
@@ -31,24 +48,40 @@ def delink_callback(sender, app_data):
     dpg.delete_item(link_tag)
     graph_manager.on_link_removed(link_tag)
 
-def add_node_callback():
-    node_tag = dpg.generate_uuid()
-    attr_in_tag = dpg.generate_uuid()
-    attr_out_tag = dpg.generate_uuid()
+def add_node_callback(sender, app_data, user_data):
+    node_type = user_data
+    if not node_type or node_type not in NODE_REGISTRY:
+        return
 
-    dpg.add_node(label="New Node", tag=node_tag, parent="Node Editor", pos=[200, 200])
+    node_class = NODE_REGISTRY[node_type]
+    node_tag = dpg.generate_uuid()
     
-    dpg.add_node_attribute(label="Input", tag=attr_in_tag, attribute_type=dpg.mvNode_Attr_Input, parent=node_tag)
-    dpg.add_text("Input", parent=attr_in_tag)
+    inputs_def, outputs_def = node_class.get_gui_definition()
     
-    dpg.add_node_attribute(label="Output", tag=attr_out_tag, attribute_type=dpg.mvNode_Attr_Output, parent=node_tag)
-    dpg.add_text("Output", parent=attr_out_tag)
+    input_attr_map = {}
+    output_attr_map = {}
+
+    with dpg.node(label=node_class.NODE_NAME, tag=node_tag, parent="Node Editor"):
+        
+        for input_name, input_type_str in inputs_def.items():
+            attr_tag = dpg.generate_uuid()
+            input_attr_map[input_name] = attr_tag
+            
+            with dpg.node_attribute(label=input_name, tag=attr_tag, attribute_type=dpg.mvNode_Attr_Input):
+                dpg.add_text(input_type_str)
+
+        for output_name, output_type_str in outputs_def.items():
+            attr_tag = dpg.generate_uuid()
+            output_attr_map[output_name] = attr_tag
+            
+            with dpg.node_attribute(label=output_name, tag=attr_tag, attribute_type=dpg.mvNode_Attr_Output):
+                dpg.add_text(output_type_str)
     
     graph_manager.add_node(
-        "BaseNode", 
+        node_type, 
         node_tag, 
-        input_attrs=[attr_in_tag], 
-        output_attrs=[attr_out_tag]
+        input_attr_map=input_attr_map, 
+        output_attr_map=output_attr_map
     )
 
 def delete_node_callback():
@@ -93,43 +126,35 @@ with dpg.window(label="SIN Workspace", tag="Primary Window", width=400, height=2
         dpg.add_button(label="Stop Engine", callback=stop_engine_callback)
     
     dpg.add_button(label="Process Graph", callback=process_graph_callback)
-    dpg.add_button(label="Add Node", callback=add_node_callback)
     dpg.add_text("Ready", tag="status_text")
 
 with dpg.window(label="Node Editor", tag="Node Editor Window"):
-    with dpg.node_editor(tag="Node Editor", callback=link_callback, delink_callback=delink_callback):
-        
-        node_1_tag = "node_1"
-        node_1_attr_in = "attr_1_in"
-        node_1_attr_out = "attr_1_out"
-        with dpg.node(label="Input Node", tag=node_1_tag, pos=[100, 100]):
-            with dpg.node_attribute(label="Input Attr", tag=node_1_attr_in, attribute_type=dpg.mvNode_Attr_Input):
-                dpg.add_text("Input")
-            with dpg.node_attribute(label="Output Attr", tag=node_1_attr_out, attribute_type=dpg.mvNode_Attr_Output):
-                dpg.add_text("Output")
-        
-        graph_manager.add_node(
-            "BaseNode", 
-            node_1_tag, 
-            input_attrs=[node_1_attr_in], 
-            output_attrs=[node_1_attr_out]
-        )
+    try:
+        with dpg.node_editor(tag="Node Editor", callback=link_callback, delink_callback=delink_callback):
+            pass
 
-        node_2_tag = "node_2"
-        node_2_attr_in = "attr_2_in"
-        with dpg.node(label="Output Node", tag=node_2_tag, pos=[400, 100]):
-            with dpg.node_attribute(label="Input Attr", tag=node_2_attr_in, attribute_type=dpg.mvNode_Attr_Input):
-                dpg.add_text("Input")
-        
-        graph_manager.add_node(
-            "BaseNode", 
-            node_2_tag, 
-            input_attrs=[node_2_attr_in], 
-            output_attrs=[]
-        )
+        # Context menu window (hidden until right-click)
+        with dpg.window(tag="Node Context Menu", no_title_bar=True, no_resize=True, no_move=True, no_scrollbar=True, modal=False, show=False):
+            for node_type_name, node_class in NODE_REGISTRY.items():
+                try:
+                    label_text = f"Add: {node_class.NODE_NAME}"
+                except Exception as e:
+                    print(f"GUI: Skipping node type '{node_type_name}' due to error reading NODE_NAME: {e}")
+                    continue
+                dpg.add_menu_item(
+                    label=label_text,
+                    callback=add_node_callback,
+                    user_data=node_type_name
+                )
+            dpg.add_separator()
+            dpg.add_menu_item(label="Close", callback=lambda: dpg.configure_item("Node Context Menu", show=False))
 
-        link_tag = dpg.add_node_link(node_1_attr_out, node_2_attr_in, tag="link_1")
-        graph_manager.on_link_added(link_tag, node_1_attr_out, node_2_attr_in)
+        # Right-click handler to open context menu
+        with dpg.item_handler_registry(tag="Node Editor Handlers"):
+            dpg.add_item_clicked_handler(button=dpg.mvMouseButton_Right, callback=show_node_context_menu)
+        dpg.bind_item_handler_registry("Node Editor", "Node Editor Handlers")
+    except Exception as e:
+        print(f"GUI: Error building Node Editor Window: {e}")
 
 dpg.create_viewport(title='SIN', width=1280, height=720)
 dpg.setup_dearpygui()
@@ -137,8 +162,12 @@ dpg.setup_dearpygui()
 with dpg.handler_registry(tag="Global Key Handler"):
     dpg.add_key_press_handler(key=dpg.mvKey_Delete, callback=delete_node_callback)
 
+# Global mouse handlers to control the context menu visibility
+with dpg.handler_registry(tag="Global Mouse Handler"):
+    dpg.add_mouse_click_handler(button=dpg.mvMouseButton_Right, callback=show_node_context_menu)
+    dpg.add_mouse_click_handler(button=dpg.mvMouseButton_Left, callback=hide_node_context_menu)
+
 dpg.show_viewport()
-dpg.set_primary_window("Primary Window", True)
 
 dpg.set_exit_callback(stop_engine_callback)
 
