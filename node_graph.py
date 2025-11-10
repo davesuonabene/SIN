@@ -1,6 +1,6 @@
 from collections import deque
 from nodes import NODE_REGISTRY
-from typing import Dict
+from typing import Dict, Any
 
 class GraphManager:
     def __init__(self, audio_engine):
@@ -8,18 +8,16 @@ class GraphManager:
         self.links = {}
         self.audio_engine = audio_engine
 
-    def add_node(self, node_type: str, dpg_tag: int, input_attr_map: Dict[str, int], output_attr_map: Dict[str, int]):
+    def add_node(self, node_type: str, dpg_tag: int) -> Any:
         print(f"GraphManager: Adding node {dpg_tag} of type {node_type}")
         if node_type in NODE_REGISTRY:
             node_class = NODE_REGISTRY[node_type]
-            new_node = node_class(
-                dpg_tag=dpg_tag,
-                input_attrs=input_attr_map,
-                output_attrs=output_attr_map
-            )
+            new_node = node_class(dpg_tag=dpg_tag)
             self.nodes[dpg_tag] = new_node
+            return new_node
         else:
             print(f"GraphManager: Unknown node type {node_type}")
+            return None
 
     def remove_node(self, node_tag):
         if node_tag in self.nodes:
