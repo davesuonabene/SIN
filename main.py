@@ -3,6 +3,7 @@ from audio_engine import AudioEngine
 from node_graph import GraphManager
 from nodes import NODE_REGISTRY
 import queue
+from theme import apply_theme
 
 def show_node_context_menu(sender, app_data, user_data):
     try:
@@ -180,6 +181,7 @@ with dpg.window(tag="Node Context Menu", no_title_bar=True, no_resize=True, no_m
 
 dpg.create_viewport(title='SIN', width=1280, height=720)
 dpg.setup_dearpygui()
+apply_theme()
 
 dpg.set_primary_window("Primary Window", True)
 

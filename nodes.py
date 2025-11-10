@@ -1,5 +1,7 @@
 import abc
 from typing import Any, Dict, Callable, List, Tuple
+import numpy as np
+from scipy.io.wavfile import write as write_wav
 
 NODE_REGISTRY: Dict[str, 'BaseNode'] = {}
 
@@ -70,7 +72,32 @@ class FileOutNode(BaseNode):
     def compute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         print(f"Computing FileOutNode {self.dpg_tag}")
         input_value = inputs.get("audio_in")
-        if input_value is not None:
+        
+        if input_value is None:
+            print(f"FileOutNode: No input received.")
+            return {}
+
+        try:
+            if not isinstance(input_value, tuple) or len(input_value) != 2:
+                print(f"FileOutNode: Error - Input must be a (array, rate) tuple.")
+                return {}
+                
+            audio_array, sample_rate = input_value
+            
+            if not isinstance(audio_array, np.ndarray):
+                print(f"FileOutNode: Error - Audio data is not a numpy array.")
+                return {}
+
+            if not isinstance(sample_rate, int):
+                print(f"FileOutNode: Error - Sample rate is not an integer.")
+                return {}
+
             filename = self.params.get("filename", "error.wav")
-            print(f"FileOutNode received: {input_value}. Saving to {filename}")
+            
+            write_wav(filename, sample_rate, audio_array.astype(np.float32))
+            print(f"FileOutNode: Saved audio to {filename} with rate {sample_rate}")
+        
+        except Exception as e:
+            print(f"FileOutNode: Failed to write file: {e}")
+
         return {}
