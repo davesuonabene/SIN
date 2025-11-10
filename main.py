@@ -6,7 +6,6 @@ import queue
 
 def show_node_context_menu(sender, app_data, user_data):
     try:
-        # Only show menu when over the Node Editor
         if dpg.is_item_hovered("Node Editor"):
             mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
             dpg.set_item_pos("Node Context Menu", [int(mouse_x), int(mouse_y)])
@@ -16,7 +15,9 @@ def show_node_context_menu(sender, app_data, user_data):
 
 def hide_node_context_menu(sender, app_data, user_data):
     try:
-        dpg.configure_item("Node Context Menu", show=False)
+        # Do not hide if the click occurred on the context menu itself
+        if dpg.is_item_shown("Node Context Menu") and not dpg.is_item_hovered("Node Context Menu"):
+            dpg.configure_item("Node Context Menu", show=False)
     except Exception:
         pass
 
@@ -83,6 +84,8 @@ def add_node_callback(sender, app_data, user_data):
         input_attr_map=input_attr_map, 
         output_attr_map=output_attr_map
     )
+    
+    dpg.configure_item("Node Context Menu", show=False)
 
 def delete_node_callback():
     print("GUI: Delete key pressed.")
@@ -133,7 +136,6 @@ with dpg.window(label="Node Editor", tag="Node Editor Window"):
         with dpg.node_editor(tag="Node Editor", callback=link_callback, delink_callback=delink_callback):
             pass
 
-        # Context menu window (hidden until right-click)
         with dpg.window(tag="Node Context Menu", no_title_bar=True, no_resize=True, no_move=True, no_scrollbar=True, modal=False, show=False):
             for node_type_name, node_class in NODE_REGISTRY.items():
                 try:
@@ -149,10 +151,6 @@ with dpg.window(label="Node Editor", tag="Node Editor Window"):
             dpg.add_separator()
             dpg.add_menu_item(label="Close", callback=lambda: dpg.configure_item("Node Context Menu", show=False))
 
-        # Right-click handler to open context menu
-        with dpg.item_handler_registry(tag="Node Editor Handlers"):
-            dpg.add_item_clicked_handler(button=dpg.mvMouseButton_Right, callback=show_node_context_menu)
-        dpg.bind_item_handler_registry("Node Editor", "Node Editor Handlers")
     except Exception as e:
         print(f"GUI: Error building Node Editor Window: {e}")
 
@@ -162,10 +160,9 @@ dpg.setup_dearpygui()
 with dpg.handler_registry(tag="Global Key Handler"):
     dpg.add_key_press_handler(key=dpg.mvKey_Delete, callback=delete_node_callback)
 
-# Global mouse handlers to control the context menu visibility
 with dpg.handler_registry(tag="Global Mouse Handler"):
-    dpg.add_mouse_click_handler(button=dpg.mvMouseButton_Right, callback=show_node_context_menu)
     dpg.add_mouse_click_handler(button=dpg.mvMouseButton_Left, callback=hide_node_context_menu)
+    dpg.add_mouse_click_handler(button=dpg.mvMouseButton_Right, callback=show_node_context_menu)
 
 dpg.show_viewport()
 
