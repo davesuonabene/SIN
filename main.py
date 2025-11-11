@@ -4,6 +4,12 @@ from node_graph import GraphManager
 from nodes import NODE_REGISTRY
 import queue
 from theme import apply_theme
+import subprocess
+import requests
+import sys
+import threading
+
+audiocraft_server_process = None
 
 def show_node_context_menu(sender, app_data, user_data):
     try:
@@ -28,6 +34,79 @@ def start_engine_callback():
 def stop_engine_callback():
     print("GUI: Stopping engine...")
     audio_engine.stop()
+
+def _launch_server_thread():
+    global audiocraft_server_process
+    local_process = None
+    try:
+        local_process = subprocess.Popen(
+            [sys.executable, "audiocraft_server.py"],
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        audiocraft_server_process = local_process
+        
+        for line in iter(local_process.stderr.readline, ''):
+            line_strip = line.strip()
+            if line_strip:
+                print(f"[Server]: {line_strip}")
+            
+            if "Starting on" in line:
+                results_queue.put("AudioCraft server started.")
+            
+            if local_process.poll() is not None:
+                break
+        
+        exit_code = local_process.poll()
+        if audiocraft_server_process is not None and exit_code != 0:
+            results_queue.put("AudioCraft server shut down unexpectedly.")
+            
+    except Exception as e:
+        if audiocraft_server_process is not None:
+            print(f"GUI: Failed to start AudioCraft server: {e}")
+            results_queue.put("Error starting AudioCraft server.")
+    
+    if audiocraft_server_process is local_process:
+        audiocraft_server_process = None
+
+def start_audiocraft_server_callback():
+    global audiocraft_server_process
+    if audiocraft_server_process is None or audiocraft_server_process.poll() is not None:
+        print("GUI: Starting AudioCraft server...")
+        dpg.set_value("status_text", "AudioCraft server starting...")
+        
+        server_thread = threading.Thread(target=_launch_server_thread, daemon=True)
+        server_thread.start()
+    else:
+        print("GUI: AudioCraft server is already running.")
+
+def stop_audiocraft_server_callback():
+    global audiocraft_server_process
+    if audiocraft_server_process is not None and audiocraft_server_process.poll() is None:
+        print("GUI: Stopping AudioCraft server...")
+        try:
+            requests.post("http://127.0.0.1:5001/shutdown")
+            audiocraft_server_process.communicate(timeout=5)
+            print("GUI: AudioCraft server stopped.")
+            dpg.set_value("status_text", "AudioCraft server stopped.")
+        except requests.exceptions.ConnectionError:
+            print("GUI: AudioCraft server already down or unreachable.")
+            dpg.set_value("status_text", "AudioCraft server is down.")
+        except subprocess.TimeoutExpired:
+            print("GUI: Server shutdown timed out. Terminating.")
+            audiocraft_server_process.terminate()
+            dpg.set_value("status_text", "AudioCraft server terminated.")
+        except Exception as e:
+            print(f"GUI: Error stopping AudioCraft server: {e}")
+            try:
+                audiocraft_server_process.terminate()
+            except Exception as e_term:
+                print(f"GUI: Failed to terminate server: {e_term}")
+        finally:
+            audiocraft_server_process = None
+    else:
+        print("GUI: AudioCraft server is not running.")
 
 def process_graph_callback():
     message = "--- GUI: Processing Graph ---"
@@ -144,6 +223,11 @@ def delete_node_callback():
         dpg.delete_item(link_tag)
         graph_manager.on_link_removed(link_tag)
 
+def on_exit_callback():
+    print("GUI: Exiting...")
+    stop_engine_callback()
+    stop_audiocraft_server_callback()
+
 results_queue = queue.Queue()
 audio_engine = AudioEngine(results_queue)
 graph_manager = GraphManager(audio_engine)
@@ -154,9 +238,21 @@ with dpg.window(tag="Primary Window", no_title_bar=True, no_close=True, no_move=
     with dpg.group(horizontal=True):
         with dpg.child_window(width=300):
             dpg.add_text("SIN // Minimal Audio Architect")
+            
+            dpg.add_separator()
+            dpg.add_text("Audio Engine")
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Start Engine", callback=start_engine_callback)
                 dpg.add_button(label="Stop Engine", callback=stop_engine_callback)
+            
+            dpg.add_separator()
+            dpg.add_text("AudioCraft Server")
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Start Server", callback=start_audiocraft_server_callback)
+                dpg.add_button(label="Stop Server", callback=stop_audiocraft_server_callback)
+
+            dpg.add_separator()
+            dpg.add_text("Graph")
             dpg.add_button(label="Process Graph", callback=process_graph_callback)
             dpg.add_text("Ready", tag="status_text")
             
@@ -194,7 +290,7 @@ with dpg.handler_registry(tag="Global Mouse Handler"):
 
 dpg.show_viewport()
 
-dpg.set_exit_callback(stop_engine_callback)
+dpg.set_exit_callback(on_exit_callback)
 
 while dpg.is_dearpygui_running():
     try:

@@ -37,6 +37,7 @@ class BaseNode(abc.ABC):
 @register_node("generator/audiocraft")
 class AudioCraftNode(BaseNode):
     NODE_NAME = "AudioCraft"
+    _model = None
 
     @staticmethod
     def get_attributes() -> Dict[str, Any]:
@@ -47,12 +48,78 @@ class AudioCraftNode(BaseNode):
 
     @staticmethod
     def get_parameters() -> Dict[str, Any]:
-        return {"prompt": "a calm lo-fi hip hop beat"}
+        return {
+            "prompt": "80s synth solo",
+            "duration_secs": "5"
+        }
 
     def compute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        prompt = self.params.get("prompt", "default prompt")
-        print(f"Computing AudioCraftNode {self.dpg_tag} with prompt: {prompt}")
-        return {"audio_out": f"audio_from_prompt: {prompt}"}
+        print(f"Computing AudioCraftNode {self.dpg_tag}")
+
+        try:
+            if AudioCraftNode._model is None:
+                print("AudioCraftNode: Loading model (first run)...")
+                #import torch
+                #from audiocraft.models import MusicGen
+                
+                #model = MusicGen.get_pretrained('facebook/audiocraft-small')
+                #AudioCraftNode._model = model
+                print("AudioCraftNode: Model loaded successfully.")
+
+            prompt = self.params.get("prompt", "default prompt")
+            duration = int(self.params.get("duration_secs", "5"))
+            
+            print(f"AudioCraftNode: Generating with prompt: {prompt}")
+            AudioCraftNode._model.set_generation_params(duration=duration)
+            
+            wav_tensors = AudioCraftNode._model.generate(descriptions=[prompt])
+            
+            audio_array = wav_tensors[0].cpu().numpy()
+            sample_rate = AudioCraftNode._model.sample_rate
+
+            print(f"AudioCraftNode: Generation complete.")
+            return {"audio_out": (audio_array, sample_rate)}
+
+        except Exception as e:
+            print(f"AudioCraftNode: Error during compute: {e}")
+            return {"audio_out": None}
+
+
+@register_node("generator/osc")
+class OscNode(BaseNode):
+    NODE_NAME = "Oscillator"
+
+    @staticmethod
+    def get_attributes() -> Dict[str, Any]:
+        return {
+            "inputs": {},
+            "outputs": {"audio_out": "audio"}
+        }
+
+    @staticmethod
+    def get_parameters() -> Dict[str, Any]:
+        return {
+            "frequency": "440",
+            "duration_secs": "1",
+            "sample_rate": "44100"
+        }
+
+    def compute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"Computing OscNode {self.dpg_tag}")
+        try:
+            frequency = float(self.params.get("frequency", "440"))
+            duration_secs = float(self.params.get("duration_secs", "1"))
+            sample_rate = int(self.params.get("sample_rate", "44100"))
+            
+            t = np.linspace(0., duration_secs, int(sample_rate * duration_secs), endpoint=False)
+            sine_wave = (0.5 * np.sin(2. * np.pi * frequency * t)).astype(np.float32)
+
+            print(f"OscNode: Generated {duration_secs}s test tone at {frequency}Hz")
+            return {"audio_out": (sine_wave, sample_rate)}
+            
+        except Exception as e:
+            print(f"OscNode: Error computing test signal: {e}")
+            return {"audio_out": None}
 
 @register_node("output/file_out")
 class FileOutNode(BaseNode):
@@ -94,7 +161,7 @@ class FileOutNode(BaseNode):
 
             filename = self.params.get("filename", "error.wav")
             
-            write_wav(filename, sample_rate, audio_array.astype(np.float32))
+            write_wav(filename, sample_rate, audio_array)
             print(f"FileOutNode: Saved audio to {filename} with rate {sample_rate}")
         
         except Exception as e:
