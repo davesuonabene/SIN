@@ -8,8 +8,28 @@ import subprocess
 import requests
 import sys
 import threading
+import json
+import os
 
 audiocraft_server_process = None
+CONFIG = {}
+
+def load_config():
+    global CONFIG
+    try:
+        if os.path.exists("config.json"):
+            with open("config.json", "r") as f:
+                CONFIG = json.load(f)
+            if "audiocraft_python_path" not in CONFIG:
+                print("GUI: Error - 'audiocraft_python_path' not in config.json")
+                return False
+            return True
+        else:
+            print("GUI: Error - config.json not found.")
+            return False
+    except Exception as e:
+        print(f"GUI: Error loading config.json: {e}")
+        return False
 
 def show_node_context_menu(sender, app_data, user_data):
     try:
@@ -38,9 +58,16 @@ def stop_engine_callback():
 def _launch_server_thread():
     global audiocraft_server_process
     local_process = None
+    
+    python_executable = CONFIG.get("audiocraft_python_path")
+    if not python_executable or not os.path.exists(python_executable):
+        print(f"GUI: Invalid AudioCraft Python path in config: {python_executable}")
+        results_queue.put("AudioCraft server path invalid. Check config.json.")
+        return
+
     try:
         local_process = subprocess.Popen(
-            [sys.executable, "audiocraft_server.py"],
+            [python_executable, "audiocraft_server.py"],
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1
@@ -73,6 +100,11 @@ def _launch_server_thread():
 def start_audiocraft_server_callback():
     global audiocraft_server_process
     if audiocraft_server_process is None or audiocraft_server_process.poll() is not None:
+        
+        if not load_config():
+            dpg.set_value("status_text", "Error: config.json is invalid or missing.")
+            return
+
         print("GUI: Starting AudioCraft server...")
         dpg.set_value("status_text", "AudioCraft server starting...")
         
@@ -219,7 +251,7 @@ def delete_node_callback():
 
     selected_links = dpg.get_selected_links("Node Editor")
     for link_tag in selected_links:
-        print(f"GUI: Deleting link {link_tag}")
+        print(f"GUI: DeLoging link {link_tag}")
         dpg.delete_item(link_tag)
         graph_manager.on_link_removed(link_tag)
 
@@ -233,6 +265,8 @@ audio_engine = AudioEngine(results_queue)
 graph_manager = GraphManager(audio_engine)
 
 dpg.create_context()
+
+load_config()
 
 with dpg.window(tag="Primary Window", no_title_bar=True, no_close=True, no_move=True):
     with dpg.group(horizontal=True):
